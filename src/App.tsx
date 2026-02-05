@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { 
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, Line, ComposedChart
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, ComposedChart
 } from 'recharts';
 import { 
-  Activity, Beaker, Info, Layers, Settings2, Droplets, Waves, Upload, Loader2, Gauge, Target, Timer, MapPin, Percent, Thermometer, Zap, Ruler, AlertTriangle, GitMerge, Drill, Box, Circle, Wind, Clock, CheckCircle2, XCircle
+  Activity, Beaker, Layers, Settings2, Droplets, Waves, Upload, Loader2, Gauge, MapPin, Wind, Zap, Thermometer, Clock
 } from 'lucide-react';
 import { MixingInputs, ConduitType, ConduitShape, MixerModel, InjectionType, PitchRatio } from './types';
 import { calculateMixing } from './calculations';
@@ -235,7 +235,7 @@ const App: React.FC = () => {
             <ResultMetric title="Achieved CoV" value={results.mixerCoV.toFixed(4)} subtitle={results.isCompliant ? 'Compliant' : 'Target Failed'} highlight={results.isCompliant ? 'green' : 'amber'} icon={<Layers size={14}/>} />
             <ResultMetric title="Velocity" value={`${results.velocity.toFixed(2)} m/s`} subtitle={`Re: ${results.reynoldsNumber.toLocaleString()}`} icon={<Wind size={14}/>} highlight="blue" />
             <ResultMetric title="Crit. Distance" value={`${results.mixingDistanceNeeded.toFixed(2)} m`} subtitle="Full Blend Point" icon={<MapPin size={14}/>} highlight="blue" />
-            <ResultMetric title="Headloss" value={`${results.headloss.toFixed(2)} kPa`} subtitle={`G: ${Math.floor(results.gValue)} s⁻¹`} icon={<Gauge size={14}/>} />
+            <ResultMetric title="Headloss" value={`${results.headlossMeters.toFixed(3)} m`} subtitle={`${results.headloss.toFixed(2)} kPa | G: ${Math.floor(results.gValue)}s⁻¹`} icon={<Gauge size={14}/>} />
           </div>
 
           <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
