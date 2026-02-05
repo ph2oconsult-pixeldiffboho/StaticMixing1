@@ -1,50 +1,72 @@
-import { GoogleGenerativeAI } from "@google/genai";
+// src/services/gemini.ts
+import { GoogleGenAI } from "@google/genai";
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string | undefined;
 
 if (!apiKey) {
-  throw new Error("VITE_GEMINI_API_KEY is not defined");
+  throw new Error("VITE_GEMINI_API_KEY is not defined. Set it in Vercel env vars.");
 }
 
-const genAI = new GoogleGenerativeAI(apiKey);
+const ai = new GoogleGenAI({ apiKey });
+
+function extractText(resp: any): string {
+  return (
+    resp?.candidates?.[0]?.content?.parts
+      ?.map((p: any) => p?.text)
+      .filter(Boolean)
+      .join("") || ""
+  );
+}
 
 export async function getAIRecommendations(
   inputs: any,
   results: any,
-  guideContent?: string
+  guideContent: string
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+  const model = "gemini-1.5-flash";
 
-  const prompt = `
-You are a senior water treatment engineer.
+  const prompt = [
+    "You are a senior water treatment engineer reviewing static mixing in pipes/channels.",
+    "Provide a concise professional audit with headings and actionable recommendations.",
+    "",
+    "INPUTS (JSON):",
+    JSON.stringify(inputs, null, 2),
+    "",
+    "RESULTS (JSON):",
+    JSON.stringify(results, null, 2),
+    "",
+    "REFERENCE GUIDE (if any):",
+    (guideContent || "").slice(0, 12000)
+  ].join("\n");
 
-Inputs:
-${JSON.stringify(inputs, null, 2)}
+  const resp = await ai.models.generateContent({
+    model,
+    contents: [{ role: "user", parts: [{ text: prompt }] }]
+  });
 
-Results:
-${JSON.stringify(results, null, 2)}
-
-${guideContent ? `Reference Guide:\n${guideContent}` : ""}
-
-Provide a concise professional audit.
-`;
-
-  const response = await model.generateContent(prompt);
-  return response.response.text();
+  return extractText(resp);
 }
 
 export async function extractGuideData(base64Pdf: string): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+  const model = "gemini-1.5-flash";
 
-  const result = await model.generateContent([
-    {
-      inlineData: {
-        data: base64Pdf,
-        mimeType: "application/pdf",
-      },
-    },
-    "Extract relevant hydraulic and mixing design guidance.",
-  ]);
+  const resp = await ai.models.generateContent({
+    model,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            inlineData: {
+              mimeType: "application/pdf",
+              data: base64Pdf
+            }
+          },
+          { text: "Extract relevant hydraulic and mixing design guidance." }
+        ]
+      }
+    ]
+  });
 
-  return result.response.text();
+  return extractText(resp);
 }
