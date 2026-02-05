@@ -688,4 +688,3 @@ const SpecItem = ({ label, value, subtext, icon, danger = false }: any) => (
 );
 
 export default App;
-// PLACE YOUR FULL App.tsx HERE (unchanged)
