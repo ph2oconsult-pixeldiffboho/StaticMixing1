@@ -1,12 +1,11 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area, Line, ComposedChart
 } from 'recharts';
 import { 
-  Activity, Beaker, Info, Layers, Settings2, Droplets, Waves, Upload, Loader2, Gauge, Target, Timer, MapPin, Percent, ChevronRight, Thermometer, Zap, Ruler, AlertTriangle, GitMerge, Drill, Box, Circle, Pyramid, Wind, Clock, CheckCircle2, XCircle
+  Activity, Beaker, Info, Layers, Settings2, Droplets, Waves, Upload, Loader2, Gauge, Target, Timer, MapPin, Percent, ChevronRight, Thermometer, Zap, Ruler, AlertTriangle, GitMerge, Drill, Box, Circle, Wind, Clock, CheckCircle2, XCircle
 } from 'lucide-react';
-import { MixingInputs, ConduitType, ConduitShape, CalculationResults, MixerModel, InjectionType, PitchRatio } from './types';
+import { MixingInputs, ConduitType, ConduitShape, MixerModel, InjectionType, PitchRatio } from './types';
 import { calculateMixing } from './calculations';
 import { getAIRecommendations, extractGuideData } from './services/gemini';
 
@@ -71,7 +70,6 @@ const App: React.FC = () => {
     waterTemperature: 15
   });
 
-  const [results, setResults] = useState<CalculationResults | null>(null);
   const [aiAnalysis, setAiAnalysis] = useState<string>('');
   const [guideContent, setGuideContent] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -79,9 +77,8 @@ const App: React.FC = () => {
   const [selectedPresetId, setSelectedPresetId] = useState('ferric');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setResults(calculateMixing(inputs));
-  }, [inputs]);
+  // Synchronous calculation ensures instant UI updates without useEffect delays
+  const results = useMemo(() => calculateMixing(inputs), [inputs]);
 
   const calculateLimeProps = (conc: number) => {
     const density = 1000 + (7 * conc);
@@ -98,10 +95,11 @@ const App: React.FC = () => {
         conduitShape: value === ConduitType.PIPE ? ConduitShape.CIRCULAR : ConduitShape.RECTANGULAR
       }));
     } else if (field === 'slurryConcentration' && selectedPresetId === 'lime') {
-      const { density, viscosity } = calculateLimeProps(Number(value));
+      const conc = Number(value) || 0;
+      const { density, viscosity } = calculateLimeProps(conc);
       setInputs(prev => ({ 
         ...prev, 
-        slurryConcentration: Number(value),
+        slurryConcentration: conc,
         chemicalDensity: density,
         chemicalViscosity: viscosity
       }));
@@ -139,53 +137,57 @@ const App: React.FC = () => {
     setIsExtracting(true);
     try {
       const reader = new FileReader();
-      reader.readAsDataURL(file);
       reader.onload = async () => {
         const base64 = (reader.result as string).split(',')[1];
         const content = await extractGuideData(base64);
         setGuideContent(content);
       };
+      reader.readAsDataURL(file);
     } finally {
       setIsExtracting(false);
     }
   };
 
-  const chartData = Array.from({ length: 21 }, (_, i) => {
-    const maxDist = Math.max(results?.mixingDistanceNeeded || 0, inputs.availableLength, 5) * 1.5;
-    const dist = (i / 20) * maxDist;
-    const decayRate = inputs.conduitType === ConduitType.PIPE ? 0.75 * Math.sqrt(0.02) : 0.6;
-    const hydraulicDiameter = results?.hydraulicDiameter || 1;
+  const chartData = useMemo(() => {
+    if (!results) return [];
     
-    let cov = 1.0;
-    if (inputs.mixerModel === MixerModel.NONE) {
-      const alpha = (inputs.flowRate / 3600 * 3600000) / (inputs.chemicalFlow + inputs.dilutionWaterFlow || 1);
-      const coVi = Math.sqrt(alpha) / (inputs.injectionType === InjectionType.TWIN ? 2 : 1);
-      cov = coVi * Math.exp(-decayRate * (dist / hydraulicDiameter));
-    } else {
-      const mixerLen = (results?.headlossMeters || 0) > 0 ? (results.headlossMeters * 10) : 1; 
-      if (dist < mixerLen) {
-        cov = 1.0 - (1.0 - (results?.mixerCoV || 1.0)) * (dist / mixerLen);
+    return Array.from({ length: 21 }, (_, i) => {
+      const maxDist = Math.max(results.mixingDistanceNeeded || 0, inputs.availableLength, 5) * 1.5;
+      const dist = (i / 20) * maxDist;
+      const decayRate = inputs.conduitType === ConduitType.PIPE ? 0.75 * Math.sqrt(0.02) : 0.6;
+      const hydraulicDiameter = results.hydraulicDiameter || 1;
+      
+      let cov = 1.0;
+      if (inputs.mixerModel === MixerModel.NONE) {
+        const alpha = (inputs.flowRate / 3600 * 3600000) / (inputs.chemicalFlow + inputs.dilutionWaterFlow || 1);
+        const coVi = Math.sqrt(alpha) / (inputs.injectionType === InjectionType.TWIN ? 2 : 1);
+        cov = coVi * Math.exp(-decayRate * (dist / hydraulicDiameter));
       } else {
-        cov = (results?.mixerCoV || 1.0) * Math.exp(-decayRate * ((dist - mixerLen) / hydraulicDiameter));
+        const mixerLen = (results.headlossMeters || 0) > 0 ? (results.headlossMeters * 10) : 1; 
+        if (dist < mixerLen) {
+          cov = 1.0 - (1.0 - (results.mixerCoV || 1.0)) * (dist / mixerLen);
+        } else {
+          cov = (results.mixerCoV || 1.0) * Math.exp(-decayRate * ((dist - mixerLen) / hydraulicDiameter));
+        }
       }
-    }
 
-    let dissolution = 0;
-    if (selectedPresetId === 'lime' && results) {
-      const time = dist / (results.velocity || 1);
-      const satLimit = results.limeSaturationLimit;
-      const saturationFactor = Math.max(0.1, (satLimit - inputs.chemicalDose) / satLimit);
-      const rateK = 0.3 * Math.sqrt(results.gValue / 100) * saturationFactor;
-      dissolution = (1 - Math.exp(-rateK * time)) * 100;
-    }
+      let dissolution = 0;
+      if (selectedPresetId === 'lime') {
+        const time = dist / (results.velocity || 1);
+        const satLimit = results.limeSaturationLimit;
+        const saturationFactor = Math.max(0.1, (satLimit - inputs.chemicalDose) / satLimit);
+        const rateK = 0.3 * Math.sqrt(results.gValue / 100) * saturationFactor;
+        dissolution = (1 - Math.exp(-rateK * time)) * 100;
+      }
 
-    return { 
-      distance: dist.toFixed(1), 
-      cov: Math.min(1.0, Math.max(0.001, cov)), 
-      target: inputs.targetCoV,
-      dissolution: Math.min(100, dissolution)
-    };
-  });
+      return { 
+        distance: dist.toFixed(1), 
+        cov: Math.min(1.0, Math.max(0.001, cov)), 
+        target: inputs.targetCoV,
+        dissolution: Math.min(100, dissolution)
+      };
+    });
+  }, [results, inputs, selectedPresetId]);
 
   const isLime = selectedPresetId === 'lime';
 
@@ -217,9 +219,7 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Inputs Column */}
         <div className="lg:col-span-4 space-y-6">
-          
           <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4 ring-2 ring-slate-400/20">
             <div className="flex items-center gap-2 mb-2 text-slate-700">
               <Activity size={18} />
@@ -240,9 +240,9 @@ const App: React.FC = () => {
                 <Target size={18} />
                 <h2 className="font-bold text-sm">Design Requirements</h2>
               </div>
-              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${results?.isTimeCompliant ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-100'}`}>
-                {results?.isTimeCompliant ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
-                Time to CoV: {results?.mixingTimeNeeded.toFixed(2)}s
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${results.isTimeCompliant ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-100'}`}>
+                {results.isTimeCompliant ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
+                Time to CoV: {results.mixingTimeNeeded.toFixed(2)}s
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -273,7 +273,6 @@ const App: React.FC = () => {
             </div>
           </section>
 
-          {/* New Geometry Settings Section */}
           <section className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4 ring-2 ring-blue-500/10">
             <div className="flex items-center justify-between mb-2 text-blue-600">
               <div className="flex items-center gap-2">
@@ -282,7 +281,7 @@ const App: React.FC = () => {
               </div>
               <div className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-bold border border-blue-100 animate-pulse">
                 <Wind size={10} />
-                {results?.velocity.toFixed(2)} m/s
+                {results.velocity.toFixed(2)} m/s
               </div>
             </div>
             
@@ -439,41 +438,40 @@ const App: React.FC = () => {
           </section>
         </div>
 
-        {/* Results Column */}
         <div className="lg:col-span-8 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <ResultMetric 
               title="Mixing efficiency" 
-              value={results?.mixerCoV.toFixed(4)} 
-              subtitle={results?.isCompliant ? 'CoV Target Met' : 'CoV Target Failed'}
-              highlight={results?.isCompliant ? 'green' : 'amber'} 
+              value={results.mixerCoV.toFixed(4)} 
+              subtitle={results.isCompliant ? 'CoV Target Met' : 'CoV Target Failed'}
+              highlight={results.isCompliant ? 'green' : 'amber'} 
               icon={<Layers size={14}/>} 
             />
             {isLime ? (
               <ResultMetric 
                 title="Time to Dissolve" 
-                value={`${results?.timeTo95Dissolution.toFixed(1)}s`} 
+                value={`${results.timeTo95Dissolution.toFixed(1)}s`} 
                 subtitle={`Reach 95% solubility`} 
-                highlight={results?.dissolvedAtTarget > 90 ? 'blue' : 'amber'} 
+                highlight={results.dissolvedAtTarget > 90 ? 'blue' : 'amber'} 
                 icon={<Timer size={14}/>} 
               />
             ) : (
               <ResultMetric 
                 title="Retention Time" 
-                value={`${results?.mixingTimeNeeded.toFixed(1)}s`} 
-                subtitle={results?.isTimeCompliant ? "Time Requirement Met" : "Exceeds Time Limit"} 
+                value={`${results.mixingTimeNeeded.toFixed(1)}s`} 
+                subtitle={results.isTimeCompliant ? "Time Requirement Met" : "Exceeds Time Limit"} 
                 icon={<Timer size={14}/>} 
-                highlight={results?.isTimeCompliant ? "blue" : "amber"} 
+                highlight={results.isTimeCompliant ? "blue" : "amber"} 
               />
             )}
             <ResultMetric 
                title="Critical Distance" 
-               value={`${results?.mixingDistanceNeeded.toFixed(2)} m`} 
+               value={`${results.mixingDistanceNeeded.toFixed(2)} m`} 
                subtitle={isLime ? `Limited by Dissolution` : `Blending Requirement`} 
                icon={<MapPin size={14}/>} 
                highlight="blue" 
             />
-            <ResultMetric title="Pressure Drop" value={`${results?.headloss.toFixed(2)} kPa`} subtitle={`G-Value: ${Math.floor(results?.gValue || 0)} s⁻¹`} icon={<Gauge size={14}/>} />
+            <ResultMetric title="Pressure Drop" value={`${results.headloss.toFixed(2)} kPa`} subtitle={`G-Value: ${Math.floor(results.gValue || 0)} s⁻¹`} icon={<Gauge size={14}/>} />
           </div>
 
           <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
@@ -523,9 +521,9 @@ const App: React.FC = () => {
                   </div>
                   <div>
                     <div className="text-[10px] font-bold uppercase text-slate-400 mb-1">Suggested Orifice (ID)</div>
-                    <div className="text-2xl font-bold text-slate-800">{results?.suggestedOrificeDiameter.toFixed(1)} mm</div>
+                    <div className="text-2xl font-bold text-slate-800">{results.suggestedOrificeDiameter.toFixed(1)} mm</div>
                     <div className="text-[10px] text-indigo-600 font-bold mt-1 uppercase tracking-tighter">
-                      Target Velocity: {( (results?.totalInjectionFlow || 0) / 3600000 / ( (inputs.injectionType === InjectionType.TWIN ? 2 : 1) * Math.PI * Math.pow((results?.suggestedOrificeDiameter || 1) / 2000, 2) ) ).toFixed(2)} m/s
+                      Target Velocity: {( (results.totalInjectionFlow || 0) / 3600000 / ( (inputs.injectionType === InjectionType.TWIN ? 2 : 1) * Math.PI * Math.pow((results.suggestedOrificeDiameter || 1) / 2000, 2) ) ).toFixed(2)} m/s
                     </div>
                   </div>
                 </div>
@@ -537,7 +535,7 @@ const App: React.FC = () => {
                 <div className="text-[10px] font-bold uppercase text-slate-400 mb-2 border-b border-slate-100 pb-1">Manufacturer Recommended Installation</div>
                 <div className="p-4 border border-indigo-100 rounded-xl bg-white shadow-sm">
                   <p className="text-sm font-semibold text-slate-800 leading-snug">
-                    {results?.manufacturerNotes}
+                    {results.manufacturerNotes}
                   </p>
                   <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-indigo-500 uppercase tracking-widest">
                     <Info size={12} /> BHR CR 7469 Logic
@@ -551,23 +549,23 @@ const App: React.FC = () => {
             <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <h3 className="font-bold text-xs uppercase tracking-widest text-slate-500">Hydraulic Audit Data</h3>
               <span className="text-[10px] font-bold px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">
-                Dh: {results?.hydraulicDiameter.toFixed(3)}m
+                Dh: {results.hydraulicDiameter.toFixed(3)}m
               </span>
             </div>
             <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-              <SpecItem label="Flow Velocity" value={`${results?.velocity.toFixed(2)} m/s`} />
-              <SpecItem label="Reynolds (Re)" value={results?.reynoldsNumber.toLocaleString() || '0'} />
-              <SpecItem label="Momentum Ratio" value={results?.momentumRatio.toFixed(3) || '0'} subtext={results?.momentumRegime} />
+              <SpecItem label="Flow Velocity" value={`${results.velocity.toFixed(2)} m/s`} />
+              <SpecItem label="Reynolds (Re)" value={results.reynoldsNumber.toLocaleString() || '0'} />
+              <SpecItem label="Momentum Ratio" value={results.momentumRatio.toFixed(3) || '0'} subtext={results.momentumRegime} />
               {isLime ? (
                 <SpecItem 
                   label="95% Soluble Point" 
-                  value={`${results?.distanceTo95Dissolution.toFixed(2)} m`} 
+                  value={`${results.distanceTo95Dissolution.toFixed(2)} m`} 
                   icon={<Ruler size={10} />} 
-                  subtext={inputs.chemicalDose > (results?.limeSaturationLimit || 0) ? "Exceeds Solubility" : "Fully Soluble"}
-                  danger={inputs.chemicalDose > (results?.limeSaturationLimit || 0)}
+                  subtext={inputs.chemicalDose > (results.limeSaturationLimit || 0) ? "Exceeds Solubility" : "Fully Soluble"}
+                  danger={inputs.chemicalDose > (results.limeSaturationLimit || 0)}
                 />
               ) : (
-                <SpecItem label="Avg G-Value" value={`${Math.floor(results?.gValue || 0)} s⁻¹`} />
+                <SpecItem label="Avg G-Value" value={`${Math.floor(results.gValue || 0)} s⁻¹`} />
               )}
             </div>
           </section>
@@ -580,7 +578,6 @@ const App: React.FC = () => {
               </div>
               <button 
                 onClick={async () => {
-                  if (!results) return;
                   setIsAnalyzing(true);
                   const res = await getAIRecommendations(inputs, results, guideContent);
                   setAiAnalysis(res);
@@ -651,7 +648,7 @@ const InputGroup = ({ label, value, onChange, step = 1, highlight = false, highl
       </label>
       <input 
         type="number" step={step} value={value} 
-        onChange={(e) => onChange(Number(e.target.value))} 
+        onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))} 
         className={`w-full border rounded-xl px-3 py-2 text-sm outline-none transition-all ${highlight ? highlightStyles[highlightColor] : 'bg-slate-50 border-slate-200 focus:ring-2 focus:ring-indigo-500'}`} 
       />
     </div>
