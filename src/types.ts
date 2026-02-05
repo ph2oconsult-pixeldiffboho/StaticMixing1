@@ -1,4 +1,6 @@
-// ===== ENUMS =====
+// =======================
+// ENUMS
+// =======================
 
 export enum ConduitType {
   PIPE = "PIPE",
@@ -26,12 +28,14 @@ export enum InjectionType {
 }
 
 export enum PitchRatio {
-  PR_1_125 = "PR_1_125",
-  PR_1_5 = "PR_1_5",
-  PR_2_25 = "PR_2_25"
+  PR_1_125 = "1.125",
+  PR_1_5 = "1.5",
+  PR_2_25 = "2.25"
 }
 
-// ===== INPUT MODEL =====
+// =======================
+// INPUTS
+// =======================
 
 export interface MixingInputs {
   conduitType: ConduitType;
@@ -39,59 +43,37 @@ export interface MixingInputs {
   mixerModel: MixerModel;
 
   numElements: number;
+
   flowRate: number;          // m³/h
   dimension: number;         // diameter or width (m)
-  depth: number;             // height or water depth (m)
+  depth?: number;            // depth / height (m)
   availableLength: number;   // m
 
   viscosity: number;         // Pa·s
   density: number;           // kg/m³
 
   chemicalType: string;
-  chemicalDose: number;      // mg/L
+  chemicalDose?: number;     // mg/L
   chemicalFlow: number;      // L/h
   chemicalDensity: number;   // kg/m³
   chemicalViscosity: number; // Pa·s
+
   dilutionWaterFlow: number; // L/h
 
   targetCoV: number;
   targetMixingTime: number;  // s
 
-  slurryConcentration: number;
+  slurryConcentration?: number; // %
   injectionType: InjectionType;
   pitchRatio: PitchRatio;
 
   waterTemperature: number;  // °C
 }
 
-// ===== CALCULATION OUTPUT =====
+// =======================
+// RESULTS
+// =======================
 
 export interface CalculationResults {
-  mixerCoV: number;
-
-  mixingDistanceNeeded: number;
-  mixingTimeNeeded: number;
-  isCompliant: boolean;
-  isTimeCompliant: boolean;
-
-  headloss: number;        // kPa
-  headlossMeters: number;  // m
-  gValue: number;          // s⁻¹
-
-  hydraulicDiameter: number;
-  velocity: number;
-  reynoldsNumber: number;
-
-  totalInjectionFlow: number;
-  suggestedOrificeDiameter: number;
-  manufacturerNotes: string;
-
-  momentumRatio: number;
-  momentumRegime: string;
-
-  // Lime-specific
-  limeSaturationLimit: number;
-  timeTo95Dissolution: number;
-  distanceTo95Dissolution: number;
-  dissolvedAtTarget: number;
-}
+  // --- Hydraulics
+  velocity: n
